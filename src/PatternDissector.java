@@ -10,6 +10,7 @@ import java.util.Stack;
 import java.util.Arrays;
 
 import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 class PatternDissector {
     
@@ -18,15 +19,15 @@ class PatternDissector {
         VERBOSE;
     }
     
-    private static LoggingLevel loggingLevel = LoggingLevel.VERBOSE;
+    private static LoggingLevel loggingLevel = LoggingLevel.SIMPLE;
     
-    private static final transient Map<String, Class> patterns;
+    private static final transient Map<String, Class<?>> patterns;
     
     static {
-        Class[] innerClasses = Pattern.class.getDeclaredClasses();
-        Map<String, Class> m = new HashMap<String, Class>();
+        Class<?>[] innerClasses = Pattern.class.getDeclaredClasses();
+        Map<String, Class<?>> m = new HashMap<String, Class<?>>();
         
-        for (Class c: innerClasses) {
+        for (Class<?> c: innerClasses) {
             m.put(c.getSimpleName(), c);
         }
         
@@ -38,7 +39,7 @@ class PatternDissector {
     /**
      * Get declared field by name in a class and make it accessible.
      */
-    private static Field getDeclaredField(Class clazz, String name) {
+    private static Field getDeclaredField(Class<?> clazz, String name) {
         Field field;
         try {
             field = clazz.getDeclaredField(name);
@@ -152,13 +153,29 @@ class PatternDissector {
         m.put("BnMS", "%s. Optimized matching with Boyer-Moore search algorithm (supplementary version) (length=%d, lengthChar=%d)\n");
         
         m.put("Branch", "%s. Attempt the following %d alternatives in printed order:\n");
-        m.put("BranchConn", "%s.\n");
+        m.put("BranchConn", "%s. Connect branches to sequel.\n");
+        
+        m.put("Pos", "%s. (DEBUG) Positive look-ahead.");
+        m.put("Behind", "%s. (DEBUG) Positive look-behind. rmax=%d, rmin=%d\n");
+        
+        m.put("Curly", "%s. (DEBUG) type=%s, cmin=%d, cmax=%d:\n");
+        m.put("GroupCurly", "%s. (DEBUG) type=%s, cmin=%d, cmax=%d:\n");
+        
+        m.put("Prolog", "%s. (DEBUG) Loop wrapper\n");
+        m.put("Loop", "%s [%h]. (DEBUG) cmin=%d, cmax=%d:\n");
+        m.put("LazyLoop", "%s [%h]. (DEBUG) cmin=%d, cmax=%d:\n");
+        
+        m.put("GroupTail", "%s [%h]. Responsible for setting and unsetting indices of matches in group repetition\n");
         
         m.put("Node", "%s. Accept match\n");
         
         m.put("Ctype", "%s. Match POSIX character class %s (US-ASCII)\n");
         m.put("BitClass", "%s. Optimized character class with boolean[] to match characters in Latin-1 (code point <= 255). Match any of the following %d character(s):\n");
-                      
+        
+        m.put("Dot", "%s. Dot in default mode: (?:.). Equivalent to [^\\n\\r\\u0085\\u2028\\u2029]\n");
+        m.put("UnixDot", "%s. Dot in UNIX_LINES mode: (?d:.). Equivalent to [^\\n]\n");
+        m.put("All", "%s. Dot in DOTALL mode: (?s:.). Match any code points\n");
+        
         m.put("CharProperty.complement", "%s (character class negation). Match any character NOT matched by the following character class:\n");
         m.put("Pattern.setDifference", "%s (character class subtraction). Match any character matched by the 1st character class, but NOT the 2nd character class:\n");
         m.put("Pattern.union", "%s (character class union). Match any character matched by either character classes below:\n");
@@ -168,6 +185,19 @@ class PatternDissector {
         
         INFO_FORMAT_STRINGS_VERBOSE = Collections.unmodifiableMap(m);
     }
+    
+    enum QUANTIFIER {
+        GREEDY("Greedy"),
+        LAZY("Lazy"),
+        POSSESSIVE("Possessive"),
+        INDEPENDENT("Independent");
+        
+        final String name;
+        
+        private QUANTIFIER(String name) {
+            this.name = name;
+        }
+    };
     
     private static final Map<String, String> INFO_FORMAT_STRINGS_SIMPLE;
     static {
@@ -196,17 +226,37 @@ class PatternDissector {
         m.put("BnMS", "%s. Boyer-Moore (supplementary version) (length=%d, lengthChar=%d)\n");
         
         m.put("Branch", "%s. Alternation (in printed order):\n");
-        m.put("BranchConn", "%s.\n");
+        m.put("BranchConn", "%s. Connect branches to sequel.\n");
+        
+        m.put("BackRef", "%s. Backreference to group %d\n");
+        
+        m.put("Pos", "%s. Positive look-ahead\n");
+        m.put("Neg", "%s. Negative look-ahead\n");
+        m.put("Behind", "%s. Positive look-behind. {%d,%d}\n");
+        
+        m.put("Prolog", "%s. Loop wrapper\n");
+        m.put("Loop", "%s [%h]. Greedy quantifier {%d,%d}\n");
+        m.put("LazyLoop", "%s [%h]. Lazy quantifier {%d,%d}:\n");
+        
+        m.put("Curly", "%s. %s quantifier {%d,%d}\n");
+        m.put("GroupCurly", "%s. (DEBUG) type=%s, cmin=%d, cmax=%d, capture=%b:\n");
+        
+        m.put("GroupHead", "%s. (DEBUG) local=%d\n");
+        m.put("GroupTail", "%s [%h]. (DEBUG) local=%d, group=%d. --[next]--> %s [%h]\n");
         
         m.put("Node", "%s. Accept match\n");
+        
+        m.put("Dot", "%s. (?:.), equivalent to [^\\n\\r\\u0085\\u2028\\u2029]\n");
+        m.put("UnixDot", "%s. (?d:.), equivalent to [^\\n]\n");
+        m.put("All", "%s. (?s:.).\n");
         
         m.put("Ctype", "%s. POSIX (US-ASCII): %s\n");
         m.put("BitClass", "%s. Match any of these %d character(s):\n");
         
-        m.put("CharProperty.complement", "%s. A\u0304:\n");
-        m.put("Pattern.setDifference", "%s. A \u2216 B:\n");
-        m.put("Pattern.union", "%s. A \u222a B:\n");
-        m.put("Pattern.intersection", "%s. A \u2229 B:\n");
+        m.put("CharProperty.complement", "%s. S\u0304:\n");
+        m.put("Pattern.setDifference", "%s. S \u2216 T:\n");
+        m.put("Pattern.union", "%s. S \u222a T:\n");
+        m.put("Pattern.intersection", "%s. S \u2229 T:\n");
         
         m.put("Pattern.rangeFor", "%s. U+%04X <= codePoint <= U+%04X.\n");
         
@@ -230,19 +280,23 @@ class PatternDissector {
         }
     }
     
-    private static boolean isPrintableCodePoint(int codePoint) {
+    private static boolean isPrintableCodePoint(int codePoint, boolean charClass) {
         switch (Character.getType(codePoint)) {
             case Character.CONTROL: // Cc
             case Character.FORMAT: // Cf
             case Character.PRIVATE_USE: // Co
             case Character.SURROGATE: // Cs
-                // A paired surrogate does not belong to Cs category, since we are working on code point
+                // Surrogate pair does not belong to Cs category, since we are working on code point
             case Character.UNASSIGNED: // Cn
                 
             case Character.LINE_SEPARATOR: // Zl
             case Character.PARAGRAPH_SEPARATOR: // Zp
             case Character.SPACE_SEPARATOR: // Zs
                 return false;
+            case Character.NON_SPACING_MARK: // Mn
+            case Character.COMBINING_SPACING_MARK: // Mc
+            case Character.ENCLOSING_MARK: // Me
+                return !charClass;
             default:
                 return true;
         }
@@ -275,24 +329,27 @@ class PatternDissector {
         return Arrays.copyOf(arr, p);
     }
     
-    private static void printCodePoints(int depth, int[] codePoints) {
+    private static void printCodePoints(int depth, int[] codePoints, boolean charClass) {
         switch (loggingLevel) {
             case VERBOSE:
+            case SIMPLE:
                 indent(depth + 1);
                 for (int cp: codePoints) {
-                    if (isPrintableCodePoint(cp)) {
+                    if (isPrintableCodePoint(cp, charClass)) {
                         System.out.print(codePointToString(cp));
                     } else {
                         System.out.printf("\\u{%04X}", cp);
                     }
                 }
                 System.out.println(); 
+                /*
             case SIMPLE:
                 indent(depth + 1);
                 for (int cp: codePoints) {
                     System.out.printf("[U+%04X]", cp);
                 }
                 System.out.println();
+                */
         }
     }
     
@@ -301,7 +358,7 @@ class PatternDissector {
     private static final Map<Integer, String> CTYPE_NAME;
     
     static {
-        Class asciiClass;
+        Class<?> asciiClass;
         try {
             asciiClass = Class.forName("java.util.regex.ASCII");
         } catch (ClassNotFoundException e) {
@@ -351,10 +408,10 @@ class PatternDissector {
             throw new InternalError("CharProperty object expected");
         }
         
-        Class clazz = node.getClass();
+        Class<?> clazz = node.getClass();
        
         if (clazz.isAnonymousClass()) {
-            Class enclosingClass = clazz.getEnclosingClass();
+            Class<?> enclosingClass = clazz.getEnclosingClass();
             Method enclosingMethod = clazz.getEnclosingMethod();
                       
             String methodName = enclosingClass.getSimpleName() + "." + enclosingMethod.getName();
@@ -404,6 +461,11 @@ class PatternDissector {
             String nodeName = clazz.getSimpleName();
             
             switch (nodeName) {
+                case "Dot":
+                case "All":
+                case "UnixDot":
+                    info(depth, nodeName);
+                    break;
                 case "Ctype":
                     int ctype = getDeclaredField(node.getClass(), "ctype").getInt(node);
                     
@@ -414,20 +476,18 @@ class PatternDissector {
                     int codePoints[] = processBitClass(bits);
                     
                     info(depth, nodeName, codePoints.length);
-                    printCodePoints(depth, codePoints);
+                    printCodePoints(depth, codePoints, true);
                     break;
                     case "SingleS":
                 case "Single":
-                    Class singleClass = patterns.get(nodeName);
-                    Field codePointField = getDeclaredField(singleClass, "c");
-                    
-                    int codePoint = codePointField.getInt(node);
+                    Class<?> singleClass = patterns.get(nodeName);
+
+                    int codePoint = getDeclaredField(singleClass, "c").getInt(node);
                     
                     info(depth, nodeName, codePoint, Character.getName(codePoint));
                     break;
                 case "SingleU":
-                    Class singleUClass = patterns.get(nodeName);
-                    Field lowerField = getDeclaredField(singleUClass, "lower");
+                    Class<?> singleUClass = patterns.get(nodeName);
                     
                     /*
                      * The character passed to SingleU has gone through toLowerCase(toUpperCase())
@@ -443,7 +503,7 @@ class PatternDissector {
                      * Java Pattern class is in accordance to Unicode Regular Expression (UTS #18),
                      * since it supports simple (1:1 case folding), case-insensitive matching.
                      */
-                    int lowercaseCodePoint = lowerField.getInt(node);
+                    int lowercaseCodePoint = getDeclaredField(singleUClass, "lower").getInt(node);
                     info(depth, nodeName, lowercaseCodePoint, Character.getName(lowercaseCodePoint));
                     break;
                 default:
@@ -462,16 +522,22 @@ class PatternDissector {
     static class Work {
         int depth;
         Object node;
+        Object inloop;
         Object branchConn;
         
         @SuppressWarnings("unchecked")
-        Work(int depth, Object node, Object branchConn) {
+        Work(int depth, Object node, Object inloop, Object branchConn) {
             this.depth = depth;
             
             if (!Node.isAssignableFrom(node.getClass())) {
                 throw new IllegalArgumentException("Object of Pattern.Node class or subclass expected");
             }
             this.node = node;
+            
+            if (inloop != null && !patterns.get("Loop").isAssignableFrom(inloop.getClass())) {
+                throw new IllegalArgumentException("Object of Pattern.Loop class expected");
+            }
+            this.inloop = inloop;
             
             if (branchConn != null && !patterns.get("BranchConn").isAssignableFrom(branchConn.getClass())) {
                 throw new IllegalArgumentException("Object of Pattern.BranchConnection class expected");
@@ -480,38 +546,47 @@ class PatternDissector {
         }
         
         Work(int depth, Object node) {
-            this(depth, node, null);
+            this(depth, node, null, null);
         }
     }
     
     private static void dissectNode(int initDepth, Object rootNode) throws IllegalAccessException { 
         Field nextField = getDeclaredField(Node, "next");
         
-        Stack<Work> workQueue = new Stack<Work>();
-        workQueue.push(new Work(initDepth, rootNode));
+        Stack<Work> workStack = new Stack<Work>();
+        workStack.push(new Work(initDepth, rootNode));
         
-        while (!workQueue.isEmpty()) {
-            Work work = workQueue.pop();
+        while (!workStack.isEmpty()) {
+            Work work = workStack.pop();
             
             int depth = work.depth;
             Object node = work.node;
+            Object inloop = work.inloop;
             Object branchConn = work.branchConn;
             
-            Object nextNode = nextField.get(node);
-            if (nextNode != null) {
-                workQueue.push(new Work(depth, nextNode, branchConn));
+            if (node == null) {
+                System.out.println("(DEBUG) null node");
+                continue;
             }
             
-            Class clazz = node.getClass();
+            Object nextNode = nextField.get(node);
+            
+            Class<?> clazz = node.getClass();
             String nodeName = clazz.getSimpleName();
+            
+            if (nextNode != null) {
+                workStack.push(new Work(depth, nextNode, inloop, branchConn));
+            }
+            
+            // System.out.println("Pushed " + workStack.peek());
+            
+            // System.out.println("Loop " + node + " " + nextNode + " " + inloop + " " + branchConn);
             
             switch (nodeName) {
                 case "Start":
                 case "StartS":
-                    Class startClass = patterns.get("Start");
-                    Field minLengthField = getDeclaredField(startClass, "minLength");
-                    
-                    int minLength = minLengthField.getInt(node);
+                    Class<?> startClass = patterns.get("Start");
+                    int minLength = getDeclaredField(startClass, "minLength").getInt(node);
                         
                     info(depth, nodeName, minLength);
                     break;
@@ -524,10 +599,8 @@ class PatternDissector {
                     break;
                 case "Dollar":
                 case "UnixDollar":
-                    Class dollarClass = patterns.get(nodeName);
-                    Field multilineField = getDeclaredField(dollarClass, "multiline");
-                    
-                    boolean multiline = multilineField.getBoolean(node);
+                    Class<?> dollarClass = patterns.get(nodeName);
+                    boolean multiline = getDeclaredField(dollarClass, "multiline").getBoolean(node);
                     
                     info(depth, nodeName + "(multiline=" + multiline + ")");
                     break;
@@ -539,56 +612,64 @@ class PatternDissector {
                      * to worry about misidentification.
                      */
                     
+                    if (nextNode != null) {
+                        throw new AssertionError("Pure Pattern.Node object doesn't use next node");
+                    }
+                    
                     info(depth, nodeName);
                     break;
                 
                 case "Slice":
                 case "SliceS":
-                    Class sliceNodeClass = patterns.get("SliceNode");
-                    Field sliceBufferField = getDeclaredField(sliceNodeClass, "buffer");
-                    
-                    int[] sliceSequence = (int[]) sliceBufferField.get(node);
-                    
-                    info(depth, nodeName);
-                    printCodePoints(depth, sliceSequence);
+                    {
+                        Class<?> sliceNodeClass = patterns.get("SliceNode");
+                        int[] buffer = (int[]) getDeclaredField(sliceNodeClass, "buffer").get(node);
+                        
+                        info(depth, nodeName);
+                        printCodePoints(depth, buffer, false);
+                    }
                     break;
                 case "BnMS":
                 case "BnM":
-                    int[] bnmSequence = (int[]) getDeclaredField(patterns.get("BnM"), "buffer").get(node);
-                    
-                    /*
-                     * Due to a bug in BnM class static optimize() function, BnMS class will
-                     * never be created.
-                     * 
-                     * Will be fixed in Java 9: https://bugs.openjdk.java.net/browse/JDK-8035076
-                     */
-                    if (nodeName.equals("BnMS")) {
-                        int lengthInChars = getDeclaredField(patterns.get("BnMS"), "lengthInChars").getInt(node);
+                    {
+                        int[] buffer = (int[]) getDeclaredField(patterns.get("BnM"), "buffer").get(node);
                         
-                        info(depth, nodeName, bnmSequence.length, lengthInChars);
-                    } else {
-                        info(depth, nodeName, bnmSequence.length);
+                        /*
+                         * Due to a bug in BnM class static optimize() function, BnMS class will
+                         * never be created.
+                         * 
+                         * Will be fixed in Java 9: https://bugs.openjdk.java.net/browse/JDK-8035076
+                         */
+                        if (nodeName.equals("BnMS")) {
+                            int lengthInChars = getDeclaredField(patterns.get("BnMS"), "lengthInChars").getInt(node);
+                            
+                            info(depth, nodeName, buffer.length, lengthInChars);
+                        } else {
+                            info(depth, nodeName, buffer.length);
+                        }
+                        
+                        printCodePoints(depth, buffer, false);
                     }
-                    
-                    printCodePoints(depth, bnmSequence);
-                    
                     break;
                 case "Branch":
-                    Class branchClass = patterns.get(nodeName);
+                    Class<?> branchClass = patterns.get(nodeName);
                     
                     Object[] nodes = (Object[]) getDeclaredField(branchClass, "atoms").get(node);
                     int size = getDeclaredField(branchClass, "size").getInt(node);
                     Object conn = getDeclaredField(branchClass, "conn").get(node);
                     
-                    printObjectTree(conn);
+                    // Branch class never uses next node for matching
+                    workStack.pop(); // TODO: assert next node = accept
+                    
+                    // printObjectTree(conn);
                     
                     info(depth, nodeName, size);
                     
-                    System.out.println("nxt" + nextNode.getClass() + " " + nextNode);
-                    workQueue.push(new Work(depth + 1, conn, branchConn));
+                    // System.out.println("nxt" + nextNode.getClass() + " " + nextNode);
+                    workStack.push(new Work(depth, conn, inloop, branchConn));
                     
                     for (int i = size - 1; i >= 0; i--) {
-                        workQueue.push(new Work(depth + 1, nodes[i], conn));
+                        workStack.push(new Work(depth + 1, nodes[i], inloop, conn));
                     }
                     
                     break;
@@ -602,13 +683,12 @@ class PatternDissector {
                      *   of each atom node without including the TreeInfo of the
                      *   "next".
                      * 
-                     * In short, this node is necessary for collecting information, rather
-                     * than matching purpose.
+                     * Chain "next", but not chain "study".
                      */
                     
                     if (node == branchConn) {
                         // Prevent duplicate printing, since BranchConn connects to the next node
-                        workQueue.pop(); 
+                        workStack.pop(); 
                         
                         indent(depth);
                         System.out.println("---");
@@ -617,11 +697,122 @@ class PatternDissector {
                     }
                     
                     break;
+                case "BackRef":
+                    {
+                        Class<?> backRefClass = patterns.get(nodeName);
+                        int groupIndex = getDeclaredField(backRefClass, "groupIndex").getInt(node);
+                        
+                        info(depth, nodeName, groupIndex);
+                    }
+                    break;
+                case "Pos":
+                case "Neg":
+                    {
+                        Class<?> posClass = patterns.get(nodeName);
+                        Object cond = getDeclaredField(posClass, "cond").get(node);
+                        
+                        workStack.push(new Work(depth + 1, cond, null, branchConn));
+                        
+                        info(depth, nodeName);
+                    }
+                    break;  
                 case "Behind":
-                    Class behindClass = patterns.get(nodeName);
-                    Object cond = getDeclaredField(behindClass, "cond").get(node);
-                    
-                    workQueue.push(new Work(depth + 1, cond));
+                    {
+                        Class<?> behindClass = patterns.get(nodeName);
+                        Object cond = getDeclaredField(behindClass, "cond").get(node);
+                        int rmin = getDeclaredField(behindClass, "rmin").getInt(node);
+                        int rmax = getDeclaredField(behindClass, "rmax").getInt(node);
+                        
+                        workStack.push(new Work(depth + 1, cond, null, branchConn));
+                        
+                        info(depth, nodeName, -rmax, -rmin);
+                    }   
+                    break;
+                case "Curly":
+                    {
+                        Class<?> curlyClass = patterns.get(nodeName);
+                        Object atom = getDeclaredField(curlyClass, "atom").get(node);
+                        int type = getDeclaredField(curlyClass, "type").getInt(node);
+                        int cmin = getDeclaredField(curlyClass, "cmin").getInt(node);
+                        int cmax = getDeclaredField(curlyClass, "cmax").getInt(node);
+                        
+                        workStack.push(new Work(depth + 1, atom, inloop, branchConn));
+                        
+                        info(depth, nodeName, QUANTIFIER.values()[type].name, cmin, cmax);
+                        // System.out.println("DEBUG node: " + clazz.getName());
+                    }
+                    break;
+                case "GroupCurly":
+                    {        
+                        Class<?> groupCurlyClass = patterns.get(nodeName);
+                        Object atom = getDeclaredField(groupCurlyClass, "atom").get(node);
+                        int type = getDeclaredField(groupCurlyClass, "type").getInt(node);
+                        int cmin = getDeclaredField(groupCurlyClass, "cmin").getInt(node);
+                        int cmax = getDeclaredField(groupCurlyClass, "cmax").getInt(node);
+                        boolean capture = getDeclaredField(groupCurlyClass, "capture").getBoolean(node);
+                        
+                        workStack.push(new Work(depth + 1, atom, inloop, branchConn));
+                        
+                        info(depth, nodeName, type, cmin, cmax, capture);
+                    }
+                    break;
+                case "GroupHead":
+                    {
+                        Class<?> groupHeadClass = patterns.get(nodeName);
+                        int localIndex = getDeclaredField(groupHeadClass, "localIndex").getInt(node);
+                        
+                        info(depth, nodeName, localIndex);
+                    }
+                    break;
+                case "GroupTail":
+                    {
+                        Class<?> groupTailClass = patterns.get(nodeName);
+                        int localIndex = getDeclaredField(groupTailClass, "localIndex").getInt(node);
+                        int groupIndex = getDeclaredField(groupTailClass, "groupIndex").getInt(node);
+                        
+                        if (nextNode == work.inloop) {
+                            workStack.pop();
+                        } 
+                        
+                        info(depth, nodeName, node.hashCode(), localIndex, groupIndex, nextNode.getClass().getSimpleName(), nextNode.hashCode());
+                    }
+                    break;
+                case "Prolog":
+                    {
+                        // Prolog( [Lazy|LazyLoop] )
+                        Class<?> prologClass = patterns.get(nodeName);
+                        Object loop = getDeclaredField(prologClass, "loop").get(node);
+                        
+                        // Prolog never uses next node for matching
+                        workStack.pop();
+                        
+                        // Hoist the node inside back one level
+                        // Should have been depth + 1
+                        workStack.push(new Work(depth, loop, inloop, branchConn));
+                        
+                        // System.out.println(clazz.getName());
+                        info(depth, nodeName);
+                    }
+                    break;
+                case "Loop":
+                case "LazyLoop":
+                    {
+                        // Loop
+                        Class<?> loopClass = patterns.get("Loop");
+                        Object body = getDeclaredField(loopClass, "body").get(node);
+                        int cmin = getDeclaredField(loopClass, "cmin").getInt(node);
+                        int cmax = getDeclaredField(loopClass, "cmax").getInt(node);
+                        
+                        
+                        if (node != inloop) {
+                            workStack.push(new Work(depth + 1, body, node, branchConn));
+                            info(depth, nodeName, node.hashCode(), cmin, cmax);
+                        } else {
+                            System.out.println("--> " + node);
+                        }
+                        
+                        // System.out.println(clazz.getName());
+                    }
                     break;
                 default:
                     if (patterns.get("CharProperty").isInstance(node)) {
@@ -630,7 +821,8 @@ class PatternDissector {
                         // System.out.println(node.getClass());
                     } else {
                         indent(depth);
-                        System.out.println("DEBUG node: " + clazz.getName());
+                        // System.out.println("DEBUG node: " + clazz.getName());
+                        System.out.println(clazz.getName());
                     }
             }
         }
@@ -676,7 +868,12 @@ class PatternDissector {
      * - https://bugs.openjdk.java.net/browse/JDK-7080302
      */
     public static void dissect(String pattern, int flags) throws IllegalAccessException {
-        
+        // TODO: This is a stub implementation
+        try {
+            dissect(Pattern.compile(pattern, flags));
+        } catch (PatternSyntaxException e) {
+            
+        }
     }
     
     private static void testAnchors() throws IllegalAccessException {
@@ -797,12 +994,13 @@ class PatternDissector {
     
     private static void testAlternation() throws IllegalAccessException {
         dissect("(12|23|34|45)");
+        dissect("^12|23|34|45$");
         dissect("^(?:12|23|34|45)$");
         
         dissect("^0(?:12|23|34|45)0$");
-        
         dissect("^0(abc|de(g|h)f)0$");
-        dissect("^12|23|34|45$");
+        
+        dissect("(abc|de(g|h)f|(abc|defg)(x|yz))");
     }
     
     public static void main(String args[]) {
@@ -810,13 +1008,51 @@ class PatternDissector {
             // testAnchors();
             // testSequence();
             // testShorthandPOSIXCharacterClass();
-            testNegateAndUnionCharClass();
+            // testNegateAndUnionCharClass();
+            // testAlternation();
+            // testFlatCharacterClass();
+            /*
             dissect("[\\a-\\f]");
             dissect("[a[^b[c[^d]e]f]g]");
+            
+            dissect("([\\x{1F601}-\\x{1F64F}])");
+            dissect("\\p{InEmoticons}");
+            dissect("[\\uD83D\uDE01-\\uD83D\\uDE4F]");
+            dissect("[\uD83D\\uDE01-\\uD83D\\uDE4F]");
+            dissect("[\\p{L}([0-9]*\\.[0-9]+|[0-9]+)_\\=]+");
+            
+            dissect("([\ud800-\udbff\udc00-\udfff])");
+            dissect("[\ud800\udc00-\udbff\udfff\ud800-\udfff]");
+            dissect("[\ud800-\udbff][\udc00-\udfff]");
+            dissect("[\\x{10000}-\\x{10ffff}\ud800-\udfff]");
+            dissect("[\\ud800\\udc00-\\udbff\\udfff\\ud800-\\udfff]");
+            */
             // dissect("[f]j");
             // dissect("[^\\\\\"]");
             // testAlternation();
             // testFlatCharacterClass();
+//          dissect("^([^@]+@)$");
+//          dissect("^[^@]+@[^@]+@[^@]+@[^@]+@[^@]+@$");
+            dissect("^([^@]@){5}$");
+//          dissect("^(?:[^@]+@)*?$");
+//          dissect("^(?:[^@]+@)*$");
+//          dissect("^(?:[^@]+@){5}$");
+//          dissect("^(?:[^@]+@){5}+$");
+//          dissect("^(?:[^@]+@){5}?$");
+            
+            dissect("(?s).*\\(.*\\).*\\{(?-s:.*)\\}.*\\;.*");
+            
+            // dissect("(((a*)+)*)+");
+            // dissect("^(a*)+|(a*(a|b)+)+$");
+            dissect("^((a*)+|(a*(a|b)+)+|(a|(b(f|er)*|c)+){2,})$");
+            dissect("(?=(.+?)(?=(.*))(?<=^(?!.*\\1(?!\\2$)).*))");
+            
+            dissect("^abc.d?ef$", Pattern.LITERAL);
+            // dissect("^(?:[^@]@){5}$");
+            // dissect("^(?:[^@]{2}@){5}$");
+            // dissect("^(?:[^@]{2,3}@){5}$");
+            
+            // dissect("[^\\\\\"]");
             
             /*
             dissect(Pattern.compile("\u2ADC", Pattern.CANON_EQ));

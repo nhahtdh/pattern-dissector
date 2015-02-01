@@ -1,0 +1,21 @@
+### Version 2015-02-02
++ Dot metacharacter `.` (`s` and `d` mode): `Dot`, `UnixDot`, `All`
++ Common facilities to handle backtracking and capturing group: `GroupHead`, `GroupTail`
++ Group and quantifier [partial]: , `Curly`, `GroupCurly`, `Prolog`, `Loop`, `LazyLoop`
++ Look-ahead and look-behind `(?=)`, `(?!)`, `(?<=)`, `(?<!)` [partial, missing negative look-behind]: `Pos`, `Neg`, `Behind`
++ Backreference `\n`, `\k<name>` [partial, no named group, only default mode]: `BackRef`
+
+### Version 2014-03-05
+* Initial public version
++ Accept node: `Node`
++ Unanchored match optimization: `Start`, `StartS`
++ String/Line boundary `^` (`m` and `d` mode), `$` (`m` and `d` mode), `\A`, `\Z`, `\z`: `Caret`, `UnixCaret`, `Dollar`, `UnixDollar`, `Begin`, `End`
++ Last match boundary `\G`: `LastMatch`
++ Sequence of characters [partial, only default mode]: `Slice`, `SliceS`
++ Sequence of characters (Boyer-Moore algorithm): `BnM`, `BnMS`
++ Single character [partial, `i` mode not supported]: `Single`, `SingleS`, `SingleU`
++ Branch [partial, null branch not supported]: `Branch`, `BranchConn`
++ POSIX character class `\p{Lower}`, `\p{Upper}`, ... [partial, only default mode]: `Ctype`
++ Optimization for matching Latin-1 characters in character class: `BitClass`
++ Character class set operations: `CharProperty.complement`, `Pattern.setDifference`, `Pattern.union`, `Pattern.intersection`
++ Character range: `Pattern.rangeFor`
