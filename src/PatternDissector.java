@@ -174,7 +174,7 @@ class PatternDissector {
         
         m.put("Dot", "%s. Dot in default mode: (?:.). Equivalent to [^\\n\\r\\u0085\\u2028\\u2029]\n");
         m.put("UnixDot", "%s. Dot in UNIX_LINES mode: (?d:.). Equivalent to [^\\n]\n");
-        m.put("All", "%s. Dot in DOTALL mode: (?s:.). Match any code points\n");
+        m.put("All", "%s. Dot in DOTALL mode: (?s:.). Match any code point\n");
         
         m.put("CharProperty.complement", "%s (character class negation). Match any character NOT matched by the following character class:\n");
         m.put("Pattern.setDifference", "%s (character class subtraction). Match any character matched by the 1st character class, but NOT the 2nd character class:\n");
@@ -248,7 +248,7 @@ class PatternDissector {
         
         m.put("Dot", "%s. (?:.), equivalent to [^\\n\\r\\u0085\\u2028\\u2029]\n");
         m.put("UnixDot", "%s. (?d:.), equivalent to [^\\n]\n");
-        m.put("All", "%s. (?s:.).\n");
+        m.put("All", "%s. Match any code point: (?s:.).\n");
         
         m.put("Ctype", "%s. POSIX (US-ASCII): %s\n");
         m.put("BitClass", "%s. Match any of these %d character(s):\n");
@@ -569,11 +569,10 @@ class PatternDissector {
                 continue;
             }
             
-            Object nextNode = nextField.get(node);
-            
             Class<?> clazz = node.getClass();
             String nodeName = clazz.getSimpleName();
             
+            Object nextNode = nextField.get(node);
             if (nextNode != null) {
                 workStack.push(new Work(depth, nextNode, inloop, branchConn));
             }
@@ -638,7 +637,9 @@ class PatternDissector {
                          * Due to a bug in BnM class static optimize() function, BnMS class will
                          * never be created.
                          * 
-                         * Will be fixed in Java 9: https://bugs.openjdk.java.net/browse/JDK-8035076
+                         * https://bugs.openjdk.java.net/browse/JDK-8035076 
+                         * 
+                         * Issue fixed and will be available in Java 9.
                          */
                         if (nodeName.equals("BnMS")) {
                             int lengthInChars = getDeclaredField(patterns.get("BnMS"), "lengthInChars").getInt(node);
@@ -857,7 +858,8 @@ class PatternDissector {
     }
     
     public static void dissect(String pattern) throws IllegalAccessException {
-        dissect(Pattern.compile(pattern));
+        // dissect(Pattern.compile(pattern));
+        dissect(pattern, 0);
     }
     
     /**
@@ -868,11 +870,14 @@ class PatternDissector {
      * - https://bugs.openjdk.java.net/browse/JDK-7080302
      */
     public static void dissect(String pattern, int flags) throws IllegalAccessException {
-        // TODO: This is a stub implementation
         try {
             dissect(Pattern.compile(pattern, flags));
+            System.out.println("Flags: " + flags);
         } catch (PatternSyntaxException e) {
-            
+            System.out.println(pattern);
+            System.out.println(getDeclaredField(PatternSyntaxException.class, "pattern").get(e));
+            System.out.println("Compilation failed: " + getDeclaredField(PatternSyntaxException.class, "desc").get(e));
+            System.out.println();
         }
     }
     
@@ -979,6 +984,7 @@ class PatternDissector {
         
         dissect("[^[abc-f]gh&&[a-d]]");
         dissect("[^[abc-f]gh&&[a-d]123p-z]");
+        dissect("[\\pN\\pL&&[\\pN\\pL]\\pM]");
         
         dissect("[0-9[a-z]A-Z]");
         dissect("[0-9&&[a-z]A-Z]");
@@ -988,8 +994,30 @@ class PatternDissector {
     }
     
     private static void testJDK_8032926() throws IllegalAccessException {
-        dissect(Pattern.compile("\u00fc", Pattern.CANON_EQ));
-        dissect(Pattern.compile("\\Q\u00fc\\E", Pattern.CANON_EQ));
+        dissect("\u00fc", Pattern.CANON_EQ);
+        dissect("\\u00fc", Pattern.CANON_EQ);
+        dissect("\\Q\u00fc\\E", Pattern.CANON_EQ);
+        dissect("\\Q\u00fc\u00fc\\E", Pattern.CANON_EQ);
+        dissect("((\u00fc\u00fc)", Pattern.CANON_EQ);
+        dissect("\u00fc\u00fc)", Pattern.CANON_EQ);
+        dissect("\u00fc\u00fc )", Pattern.CANON_EQ);
+        dissect("\u00fc\u00fc", Pattern.CANON_EQ);
+        dissect("\u00fc\\u00fc", Pattern.CANON_EQ);
+        
+        dissect("\u00ea\u0301", Pattern.CANON_EQ);
+        dissect("\u1EBF", Pattern.CANON_EQ);
+        dissect("\u1EBF\u1EBF", Pattern.CANON_EQ);
+        dissect("\u1FA3", Pattern.CANON_EQ);
+        // dissect("\u1FA3\u1FA3", Pattern.CANON_EQ);
+        dissect("\ud55c\uad6d\uc5b4", Pattern.CANON_EQ);
+        
+        dissect("[\u00fc]", Pattern.CANON_EQ);
+        dissect("[\u00c0-\u00dd]", Pattern.CANON_EQ);
+        dissect("[\u00c0\u00dd]", Pattern.CANON_EQ);
+        dissect("[\\u00c0-\\u00dd]", Pattern.CANON_EQ);
+        dissect("[[\u00c0-\u00dd]])", Pattern.CANON_EQ);
+        
+        dissect("(\\Q\u1EBF\\\\E)", Pattern.CANON_EQ);
     }
     
     private static void testAlternation() throws IllegalAccessException {
@@ -1003,6 +1031,36 @@ class PatternDissector {
         dissect("(abc|de(g|h)f|(abc|defg)(x|yz))");
     }
     
+    private static void testNamedCapturingGroup() throws IllegalAccessException {
+        dissect("(?x)  (  ?<  n\ta \n m e   > name  )");
+        dissect("(?x)  (  ?<  name   > name  )");
+        dissect("(?x)  (  ? <  name   > name )");
+        dissect("(?x)  (  ?<  na # half a name   \nme   > name )");
+    }
+    
+    // SO28161874
+    private static void testQuantifier() throws IllegalAccessException {
+        dissect("^([^@]+@)$");
+        dissect("^[^@]+@[^@]+@[^@]+@[^@]+@[^@]+@$");
+        
+        dissect("^([^@]@){5}$");
+        dissect("^(?:[^@]@){5}$");
+        dissect("^(?:[^@]{2}@){5}$");
+        dissect("^(?:[^@]{2,3}@){5}$");
+        
+        dissect("^(?:[^@]+@)*?$");
+        dissect("^(?:[^@]+@)*$");
+        dissect("^(?:[^@]+@){5}$");
+        dissect("^(?:[^@]+@){5}+$");
+        dissect("^(?:[^@]+@){5}?$");
+    }
+    
+    private static void testNestedQuantifierAlternation() throws IllegalAccessException {
+        dissect("(((a*)+)*)+");
+        dissect("^(a*)+|(a*(a|b)+)+$");
+        dissect("^((a*)+|(a*(a|b)+)+|(a|(b(f|er)*|c)+){2,})$");
+    }
+    
     public static void main(String args[]) {
         try {
             // testAnchors();
@@ -1011,48 +1069,49 @@ class PatternDissector {
             // testNegateAndUnionCharClass();
             // testAlternation();
             // testFlatCharacterClass();
-            /*
+            // testNamedCapturingGroup();
+        	// testJDK_8032926();
+            
             dissect("[\\a-\\f]");
             dissect("[a[^b[c[^d]e]f]g]");
+            dissect("[f]j");
+            dissect("[^\\\\\"]");
             
-            dissect("([\\x{1F601}-\\x{1F64F}])");
-            dissect("\\p{InEmoticons}");
-            dissect("[\\uD83D\uDE01-\\uD83D\\uDE4F]");
-            dissect("[\uD83D\\uDE01-\\uD83D\\uDE4F]");
-            dissect("[\\p{L}([0-9]*\\.[0-9]+|[0-9]+)_\\=]+");
+            // dissect("([\\x{1F601}-\\x{1F64F}])");
+            // dissect("\\p{InEmoticons}");
+            // dissect("[\\uD83D\uDE01-\\uD83D\\uDE4F]");
+            // dissect("[\uD83D\\uDE01-\\uD83D\\uDE4F]");
+            // dissect("[\\p{L}([0-9]*\\.[0-9]+|[0-9]+)_\\=]+");
             
-            dissect("([\ud800-\udbff\udc00-\udfff])");
-            dissect("[\ud800\udc00-\udbff\udfff\ud800-\udfff]");
-            dissect("[\ud800-\udbff][\udc00-\udfff]");
-            dissect("[\\x{10000}-\\x{10ffff}\ud800-\udfff]");
-            dissect("[\\ud800\\udc00-\\udbff\\udfff\\ud800-\\udfff]");
-            */
-            // dissect("[f]j");
-            // dissect("[^\\\\\"]");
-            // testAlternation();
-            // testFlatCharacterClass();
-//          dissect("^([^@]+@)$");
-//          dissect("^[^@]+@[^@]+@[^@]+@[^@]+@[^@]+@$");
-            dissect("^([^@]@){5}$");
-//          dissect("^(?:[^@]+@)*?$");
-//          dissect("^(?:[^@]+@)*$");
-//          dissect("^(?:[^@]+@){5}$");
-//          dissect("^(?:[^@]+@){5}+$");
-//          dissect("^(?:[^@]+@){5}?$");
+            // dissect("([\ud800-\udbff\udc00-\udfff])");
+            // dissect("[\ud800\udc00-\udbff\udfff\ud800-\udfff]");
+            // dissect("[\ud800-\udbff][\udc00-\udfff]");
+            // dissect("[\\x{10000}-\\x{10ffff}\ud800-\udfff]");
+            // dissect("[\\ud800\\udc00-\\udbff\\udfff\\ud800-\\udfff]");
             
-            dissect("(?s).*\\(.*\\).*\\{(?-s:.*)\\}.*\\;.*");
+            // dissect("[A-Z&&[A-D0-5]a-d[e-f6-8]n-z]");
+            // dissect("[A-Z&&[A-D0-5][e-f6-8]n-z]");
             
-            // dissect("(((a*)+)*)+");
-            // dissect("^(a*)+|(a*(a|b)+)+$");
-            dissect("^((a*)+|(a*(a|b)+)+|(a|(b(f|er)*|c)+){2,})$");
-            dissect("(?=(.+?)(?=(.*))(?<=^(?!.*\\1(?!\\2$)).*))");
+            // dissect("a{0,4294967295}");
+            // dissect("a{0,4294967297}");
+            // dissect("^*$+");
             
-            dissect("^abc.d?ef$", Pattern.LITERAL);
-            // dissect("^(?:[^@]@){5}$");
-            // dissect("^(?:[^@]{2}@){5}$");
-            // dissect("^(?:[^@]{2,3}@){5}$");
+            // Cause dissect crash with NPE at Branch
+            // dissect("(\\Q\u1EBF\\\\E)?[\\w&&[\\p{L1}]\\p{Z}]+|\\1", Pattern.CANON_EQ);
             
-            // dissect("[^\\\\\"]");
+            // dissect("(?x) .{0,2} | (?: (?=(\\2|^)) (?=(\\2\\3|^.)) (?=(\\1)) \\2)+ . ");
+            // dissect("(\u1EBF[)?+\u01de])\u1fa7\u1faf+){2}", Pattern.CANON_EQ);
+            // dissect("\ud804\u1f85?\u1f8c\u1fb4\udc9a?\ud834\uddbd)\ud834\uddbf\ud0aa", Pattern.CANON_EQ);
+            
+            // dissect("abc(?i)DEF");
+            // dissect("abc(?-i)DEF", Pattern.CASE_INSENSITIVE);
+            
+            // dissect("(?s).*\\(.*\\).*\\{(?-s:.*)\\}.*\\;.*");
+            // dissect("(?=(.+?)(?=(.*))(?<=^(?!.*\\1(?!\\2$)).*))");
+            
+            // dissect("^abc.d?ef$", Pattern.LITERAL);
+            
+            // dissect("(\\Q\u1EBF\\\\E)?+[\\w&&[\\p{L1}]\\p{Z}]+|\\1[\uD835\uDC00-\uD835\uDC33]{1927027271663633,2254527117918231}", Pattern.CANON_EQ);
             
             /*
             dissect(Pattern.compile("\u2ADC", Pattern.CANON_EQ));
@@ -1065,7 +1124,6 @@ class PatternDissector {
             
             dissect(Pattern.compile("(?<=a)"));
             
-            testJDK_8032926();
             // dissect(Pattern.compile("[\u1f80\u1f82]", Pattern.CANON_EQ));
             */
         } catch (IllegalAccessException e) {
